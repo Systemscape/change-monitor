@@ -1,0 +1,10 @@
+[package]
+name = "change-monitor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_derive = "1.0"
+
