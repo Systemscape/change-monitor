@@ -15,6 +15,21 @@ struct Dependency {
 /// Type for dependency entries
 type Dependencies = HashMap<String, Dependency>;
 
+// Check if the working tree is clean
+fn check_clean_working_tree(files: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("status")
+        .arg("--porcelain=v2")
+        .args(files)
+        .output().unwrap();
+
+    if output.stdout == vec![] {
+        "".to_string()
+    } else {
+        " DIRTY".to_string()
+    }
+}
+
 /// Checks if inside .git repository
 fn check_git_repository() -> Result<ExitStatus, String> {
     let output = Command::new("git")
@@ -90,11 +105,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         files
     };
 
-    let latest_commit = get_latest_commit(all_files).filter(|s| !s.is_empty());
+    let latest_commit = get_latest_commit(all_files.clone()).filter(|s| !s.is_empty());
 
     if let Some(commit_hash) = latest_commit {
         //println!("Latest commit affecting {}: {}", filename, commit_hash);
-        println!("{}", commit_hash);
+        let mut owned_hash: String = commit_hash.to_owned();
+        let owned_flag: String = check_clean_working_tree(&all_files).to_owned();
+        owned_hash.push_str(&owned_flag);
+        println!("{owned_hash}");
     } else {
         eprintln!("No commits found.");
         std::process::exit(1);
