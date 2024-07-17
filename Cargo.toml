@@ -11,4 +11,4 @@ log = { version = "0.4.22", features = [
     "release_max_level_info",
     "max_level_debug",
 ] }
-simple_logger = { version = "5.0.0", default-features = false }
+simple_logger = { version = "5.0.0", default-features = true, features = ["stderr"] }
