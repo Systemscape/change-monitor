@@ -36,6 +36,11 @@ or using the alias
 just i
 ```
 
+## Alternative using cargo
+```bash
+cargo install --git <git repo address> --locked
+```
+
 # Usage
 
 ```
@@ -43,11 +48,12 @@ change-monitor <filename>
 ```
 
 # .deps.toml template
+List dependencies for each versioned file
 
 ```toml
 ["file1.txt"]
 dependencies = ["dep1.txt", "dep2.txt"]
 
 ["file2.txt"]
-dependencies = [] # no dependencies, except from the file itself
+dependencies = [] # no dependencies, except for the file itself
 ```
