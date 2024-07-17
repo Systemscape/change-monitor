@@ -1,12 +1,12 @@
+use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::process::{Command, ExitStatus};
 use std::path::Path;
-use anyhow::Result;
+use std::process::{Command, ExitStatus};
 
-/// Struct for parsing the .deps.toml file 
+/// Struct for parsing the .deps.toml file
 #[derive(Deserialize)]
 struct Dependency {
     dependencies: Option<Vec<String>>,
@@ -15,22 +15,25 @@ struct Dependency {
 /// Type for dependency entries
 type Dependencies = HashMap<String, Dependency>;
 
-// Check if the working tree is clean
+/// Check if the working tree is clean, returns "" or " DIRTY"
 fn check_clean_working_tree(files: &[&str]) -> String {
     let output = Command::new("git")
         .arg("status")
-        .arg("--porcelain=v2")
+        .arg("--porcelain=v2") // stable scripting interface
         .args(files)
-        .output().unwrap();
+        .output()
+        .unwrap();
 
+    // if there is no output, working tree is clean
     if output.stdout == vec![] {
         "".to_string()
     } else {
-        " DIRTY".to_string()
+        " DIRTY".to_string() // otherwise DIRTY will be appended
     }
 }
 
-/// Checks if inside .git repository
+/// Checks if inside .git repository.
+/// Theoretically redundant, only for nicer error messages.
 fn check_git_repository() -> Result<ExitStatus, String> {
     let output = Command::new("git")
         .arg("rev-parse")
@@ -45,9 +48,13 @@ fn check_git_repository() -> Result<ExitStatus, String> {
     }
 }
 
-/// Finds the latest
+/// Finds the latest commit affecting the files, or the date of this latest commit
 fn get_latest_commit(files: Vec<&str>, get_date: bool) -> Option<String> {
-    let format = if get_date { "--pretty=format:%cs" } else { "--pretty=format:%H" };
+    let format = if get_date {
+        "--pretty=format:%cs"
+    } else {
+        "--pretty=format:%H"
+    }; // cs is commiter date, short format: https://git-scm.com/docs/pretty-formats
     let output = Command::new("git")
         .arg("log")
         .arg("-1")
@@ -65,12 +72,12 @@ fn get_latest_commit(files: Vec<&str>, get_date: bool) -> Option<String> {
     }
 }
 
-/// Parses a file called .deps.toml in the local directory
+/// Parses a file called .deps.toml in the local directory.
 /// If no file is found, the complete local directory (and all subdirectories) are used for the git log command
 /// If the file under question does not have a .deps.toml entry, the complete local directory
 /// (and all subdirectories) are used for the git log command.
 /// If the file is not yet commited, the complete local directory (and all subdirectories) are used for the
-/// git log command
+/// git log command.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
@@ -88,10 +95,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // If there is no .deps.toml file, just use the local folder
     let dependencies: Dependencies = if dependencies_path.exists() {
-        let toml_content = fs::read_to_string(dependencies_path)
-            .expect("Failed to read .deps.toml");
-        toml::from_str(&toml_content)
-            .expect("Failed to parse .deps.toml")
+        let toml_content =
+            fs::read_to_string(dependencies_path).expect("Failed to read .deps.toml");
+        toml::from_str(&toml_content).expect("Failed to parse .deps.toml")
     } else {
         HashMap::new()
     };
