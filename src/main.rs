@@ -2,17 +2,15 @@ use log::{self, debug, error, info, warn};
 use serde::Deserialize;
 use std::{
     collections::HashMap,
-    env,
-    ffi::OsString,
-    fs,
-    path::{Path, PathBuf},
+    env, fs,
+    path::PathBuf,
     process::{Command, ExitStatus},
 };
 
 const DEPENDENCIES_PATH: &str = ".deps.toml";
 
 /// Struct for parsing the .deps.toml file
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct Dependency {
     dependencies: Option<Vec<PathBuf>>,
 }
@@ -109,6 +107,10 @@ fn main() {
         .try_exists()
         .unwrap_or_else(|_| panic!("{} does not exist", filepath.display()));
 
+    let filename = filepath
+        .file_name()
+        .expect("Could not obtain filename from filepath.");
+
     info!("Monitor changes for file: {:#?}", filepath);
 
     let get_date = args.get(2).map_or(false, |arg| arg == "--date");
@@ -130,40 +132,58 @@ fn main() {
         dependencies_path.display()
     );
 
-    // Collect all files to be monitored
-    let all_files: Vec<PathBuf> = if let Some(dependencies) = dependencies {
-        let mut files = vec![filepath.clone()]; // Always include the filename itself
+    // Collect a Vec of all files that shall be monitored.
+    // First, determine whether any dependencies for the file are specified.
+    // This is nested in one extra struct so we can extend this later on without breaking the existing toml files.
+    let all_files = match dependencies.and_then(|map| map.get(filename.to_str().unwrap()).cloned())
+    {
+        Some(deps) => {
+            // Dependencies have been specified. So we get them from the nested struct.
+            // When that nested Option is None, we continue with an empty vector (unwrap_or_default).
+            let mut dependencies = deps.dependencies.unwrap_or_default();
 
-        let filename = filepath
-            .file_name()
-            .expect("Could not obtain filename from filepath.");
+            // For all files, check whether they exist and issue a warning if they don't.
+            for file in &mut dependencies {
+                match file.try_exists() {
+                    Ok(result) if !result => {
+                        warn!("{} does not exist. Ignoring...", file.display());
+                        file.clear()
+                    }
+                    Err(_) => warn!("Cannot determine whether {} exist", file.display()),
+                    _ => (),
+                }
+            }
 
-        // If it does not contain the filename as a key (either unspecified or dependencies file was empty/non-existent) we watch the current path
-        if let Some(deps) = dependencies.get(filename.to_str().unwrap()) {
-            files.extend(deps.dependencies.clone().unwrap_or_default())
-        } else {
+            // Filter out files that don't exist or can't be canoncialized (bad! this should never happen for an existing file).
+            // This should also filter out any non-existent files that we `clear()`ed earlier.
+            dependencies = dependencies
+                .iter_mut()
+                .filter(|dep| dep.exists())
+                .filter_map(|dep| dep.canonicalize().ok())
+                .collect::<Vec<_>>();
+
+            debug!("Dependencies after filtering: {:#?}", dependencies);
+
+            let mut files = vec![filepath.clone()]; // Always include the filename itself
+            files.extend(dependencies);
+            files
+        }
+        None => {
+            // If the given filename hasn't been specified in the toml file, we just we watch the file's base_directory.
             warn!(
                 "No dependencies entry found for file {:#?}. Monitoring basedirectory.",
                 filename
             );
+            vec![base_directory]
         }
-        files
-    } else {
-        vec![base_directory]
     };
 
-    debug!("all_files: {:#?}", all_files);
-
-    for file in &all_files {
-        if !file.exists() {
-            warn!("{} does not exist", file.display())
-        }
-    }
+    debug!("all_files to monitor: {:#?}", all_files);
 
     let latest_commit = get_latest_commit(&all_files, get_date).filter(|s| !s.is_empty());
 
     if let Some(commit_hash) = latest_commit {
-        //println!("Latest commit affecting {}: {}", filename, commit_hash);
+        debug!("Latest commit affecting {:#?}: {}", all_files, commit_hash);
         let mut owned_hash: String = commit_hash.to_owned();
         if !get_date {
             let owned_flag: String = check_clean_working_tree(&all_files).to_owned();
@@ -171,7 +191,7 @@ fn main() {
         }
         println!("{owned_hash}");
     } else {
-        eprintln!("No commits found.");
+        error!("No commits found.");
         std::process::exit(1);
     }
 }
