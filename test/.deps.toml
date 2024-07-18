@@ -1,2 +1,4 @@
 ["testfile.txt"]
-dependencies = ["testfile2.txt", "file_does_not_exist.noexist", "."]
+#dependencies = ["*.txt", "file_does_not_exist.noexist", ":!./subfolder/*.txt"]
+dependencies = ["*.txt", ":!subfolder"]
+#dependencies = ["*.txt"]
