@@ -12,11 +12,8 @@ const DEPENDENCIES_PATH: &str = ".deps.toml";
 /// Struct for parsing the .deps.toml file
 #[derive(Deserialize, Debug, Clone)]
 struct Dependency {
-    dependencies: Option<Vec<PathBuf>>,
+    dependencies: Option<Vec<String>>,
 }
-
-/// Type for dependency entries
-type Dependencies = HashMap<String, Dependency>;
 
 /// Check if the working tree is clean, returns "" or " DIRTY"
 fn check_clean_working_tree(files: &Vec<PathBuf>) -> String {
@@ -109,7 +106,9 @@ fn main() {
 
     let filename = filepath
         .file_name()
-        .expect("Could not obtain filename from filepath.");
+        .expect("Could not obtain filename from filepath.")
+        .to_str()
+        .expect("filename not convertible to string");
 
     info!("Monitor changes for file: {:#?}", filepath);
 
@@ -117,20 +116,34 @@ fn main() {
 
     let dependencies_path = base_directory.join(DEPENDENCIES_PATH);
 
+    let toml_file_string =
+        fs::read_to_string(&dependencies_path).expect("Failed to read .deps.toml");
+    let toml_file_table = toml_file_string
+        .parse::<toml::Table>()
+        .expect("Failed to parse .deps.toml");
     // If there is no .deps.toml file, just use the local folder
-    let dependencies: Option<Dependencies> = if dependencies_path.exists() {
-        let toml_content =
-            fs::read_to_string(&dependencies_path).expect("Failed to read .deps.toml");
-        Some(toml::from_str(&toml_content).expect("Failed to parse .deps.toml"))
-    } else {
-        None
-    };
+    let dependencies: Option<Vec<String>> = toml_file_table
+        .get(filename)
+        .and_then(|key| key.get("dependencies"))
+        .and_then(|deps| deps.as_array())
+        .map(|deps| {
+            deps.iter()
+                .map(|dep| {
+                    dep.as_str()
+                        .expect("dependency was not a string")
+                        .to_string()
+                })
+                .collect()
+        });
 
     debug!(
         "Found dependencies: {:#?}\nSourcefile: {:#?}",
         dependencies,
         dependencies_path.display()
     );
+    return;
+
+    /*
 
     // Collect a Vec of all files that shall be monitored.
     // First, determine whether any dependencies for the file are specified.
@@ -146,19 +159,20 @@ fn main() {
             for file in &mut dependencies {
                 match file.try_exists() {
                     Ok(result) if !result => {
-                        warn!("{} does not exist. Ignoring...", file.display());
-                        file.clear()
+                        warn!("{} does not exist.", file.display());
+                        //file.clear()
                     }
                     Err(_) => warn!("Cannot determine whether {} exist", file.display()),
                     _ => (),
                 }
             }
 
+            debug!("Dependencies before filtering: {:#?}", dependencies);
             // Filter out files that don't exist or can't be canoncialized (bad! this should never happen for an existing file).
             // This should also filter out any non-existent files that we `clear()`ed earlier.
             dependencies = dependencies
                 .iter_mut()
-                .filter(|dep| dep.exists())
+                //.filter(|dep| dep.exists())
                 .filter_map(|dep| dep.canonicalize().ok())
                 .collect::<Vec<_>>();
 
@@ -194,4 +208,5 @@ fn main() {
         error!("No commits found.");
         std::process::exit(1);
     }
+    */
 }
