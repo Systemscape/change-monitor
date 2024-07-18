@@ -7,6 +7,8 @@ use std::{
 
 const DEPENDENCIES_PATH: &str = ".deps.toml";
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Check if the working tree is clean, returns "" or " DIRTY"
 fn check_clean_working_tree(files: &Vec<String>, cwd: &Path) -> String {
     let output = Command::new("git")
@@ -78,18 +80,27 @@ fn main() {
 
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        eprintln!("Usage: {} <filename> [--date <date>]", args[0]);
+    if args.len() < 2 || args.len() > 3 {
+        eprintln!("Usage: {} <filename> [--date]", args[0]);
         std::process::exit(1);
+    }
+
+    if &args[1] == "-v" || &args[1] == "--version" {
+        eprintln!("Version: {}", VERSION);
+        std::process::exit(0);
     }
 
     let filepath = PathBuf::from(&args[1])
         .canonicalize()
-        .expect("Unable to canonicalize <filename>");
+        .unwrap_or_else(|e| panic!("Invalid file: {}. Error: {}", &args[1], e));
 
-    let base_directory = filepath
-        .parent()
-        .expect("Cannot obtain directory for filename");
+    let base_directory = if filepath.is_dir() {
+        &filepath
+    } else {
+        filepath
+            .parent()
+            .expect("Cannot obtain directory for filename")
+    };
 
     let base_directory_string = base_directory
         .to_str()
@@ -142,9 +153,8 @@ fn main() {
     };
 
     debug!(
-        "Found dependencies: {:#?}\nin sourcefile: {:#?}",
-        dependencies,
-        dependencies_path.display()
+        "Searching: {:#?}. Found dependencies: {:#?}",
+        dependencies_path, dependencies,
     );
 
     // Collect a Vec of all files that shall be monitored.
