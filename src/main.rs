@@ -1,26 +1,18 @@
 use log::{self, debug, error, info, warn};
-use serde::Deserialize;
 use std::{
-    collections::HashMap,
     env, fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, ExitStatus},
 };
 
 const DEPENDENCIES_PATH: &str = ".deps.toml";
 
-/// Struct for parsing the .deps.toml file
-#[derive(Deserialize, Debug, Clone)]
-struct Dependency {
-    dependencies: Option<Vec<PathBuf>>,
-}
-
-/// Type for dependency entries
-type Dependencies = HashMap<String, Dependency>;
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Check if the working tree is clean, returns "" or " DIRTY"
-fn check_clean_working_tree(files: &Vec<PathBuf>) -> String {
+fn check_clean_working_tree(files: &Vec<String>, cwd: &Path) -> String {
     let output = Command::new("git")
+        .current_dir(cwd)
         .arg("status")
         .arg("--porcelain=v2") // stable scripting interface
         .args(files)
@@ -37,8 +29,9 @@ fn check_clean_working_tree(files: &Vec<PathBuf>) -> String {
 
 /// Checks if inside .git repository.
 /// Theoretically redundant, only for nicer error messages.
-fn check_git_repository() -> Result<ExitStatus, String> {
+fn check_git_repository(cwd: &Path) -> Result<ExitStatus, String> {
     let output = Command::new("git")
+        .current_dir(cwd)
         .arg("rev-parse")
         .arg("--is-inside-work-tree")
         .output()
@@ -52,13 +45,14 @@ fn check_git_repository() -> Result<ExitStatus, String> {
 }
 
 /// Finds the latest commit affecting the files, or the date of this latest commit
-fn get_latest_commit(files: &Vec<PathBuf>, get_date: bool) -> Option<String> {
+fn get_latest_commit(files: &Vec<String>, get_date: bool, cwd: &Path) -> Option<String> {
     let format = if get_date {
         "--pretty=format:%cs"
     } else {
         "--pretty=format:%H"
     }; // cs is commiter date, short format: https://git-scm.com/docs/pretty-formats
     let output = Command::new("git")
+        .current_dir(cwd)
         .arg("log")
         .arg("-1")
         .arg(format)
@@ -86,21 +80,35 @@ fn main() {
 
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        eprintln!("Usage: {} <filename> [--date <date>]", args[0]);
+    if args.len() < 2 || args.len() > 3 {
+        eprintln!("Usage: {} <filename> [--date]", args[0]);
         std::process::exit(1);
     }
 
-    check_git_repository().expect("Checking git repository failed");
+    if &args[1] == "-v" || &args[1] == "--version" {
+        eprintln!("Version: {}", VERSION);
+        std::process::exit(0);
+    }
 
     let filepath = PathBuf::from(&args[1])
         .canonicalize()
-        .expect("Unable to canonicalize <filename>");
+        .unwrap_or_else(|e| panic!("Invalid file: {}. Error: {}", &args[1], e));
 
-    let base_directory = filepath
-        .parent()
-        .expect("Cannot obtain directory for filename")
-        .to_path_buf();
+    let base_directory = if filepath.is_dir() {
+        &filepath
+    } else {
+        filepath
+            .parent()
+            .expect("Cannot obtain directory for filename")
+    };
+
+    let base_directory_string = base_directory
+        .to_str()
+        .expect("Cannot convert base directory to string");
+
+    debug!("Using cwd: {:#?}", base_directory);
+
+    check_git_repository(base_directory).expect("Checking git repository failed");
 
     // Check if the file exists at all
     filepath
@@ -109,7 +117,9 @@ fn main() {
 
     let filename = filepath
         .file_name()
-        .expect("Could not obtain filename from filepath.");
+        .expect("Could not obtain filename from filepath.")
+        .to_str()
+        .expect("filename not convertible to string");
 
     info!("Monitor changes for file: {:#?}", filepath);
 
@@ -117,55 +127,43 @@ fn main() {
 
     let dependencies_path = base_directory.join(DEPENDENCIES_PATH);
 
-    // If there is no .deps.toml file, just use the local folder
-    let dependencies: Option<Dependencies> = if dependencies_path.exists() {
-        let toml_content =
+    let dependencies = if dependencies_path.exists() {
+        let toml_file_string =
             fs::read_to_string(&dependencies_path).expect("Failed to read .deps.toml");
-        Some(toml::from_str(&toml_content).expect("Failed to parse .deps.toml"))
+        let toml_file_table: toml::map::Map<String, toml::Value> = toml_file_string
+            .parse::<toml::Table>()
+            .expect("Failed to parse .deps.toml");
+
+        let dependencies: Option<Vec<String>> = toml_file_table
+            .get(filename)
+            .and_then(|key| key.get("dependencies"))
+            .and_then(|deps| deps.as_array())
+            .map(|deps| {
+                deps.iter()
+                    .map(|dep| {
+                        dep.as_str()
+                            .expect("dependency was not a string")
+                            .to_string()
+                    })
+                    .collect()
+            });
+        dependencies
     } else {
         None
     };
 
     debug!(
-        "Found dependencies: {:#?}\nSourcefile: {:#?}",
-        dependencies,
-        dependencies_path.display()
+        "Searching: {:#?}. Found dependencies: {:#?}",
+        dependencies_path, dependencies,
     );
 
     // Collect a Vec of all files that shall be monitored.
     // First, determine whether any dependencies for the file are specified.
     // This is nested in one extra struct so we can extend this later on without breaking the existing toml files.
-    let all_files = match dependencies.and_then(|map| map.get(filename.to_str().unwrap()).cloned())
-    {
+    let all_files = match dependencies {
         Some(deps) => {
-            // Dependencies have been specified. So we get them from the nested struct.
-            // When that nested Option is None, we continue with an empty vector (unwrap_or_default).
-            let mut dependencies = deps.dependencies.unwrap_or_default();
-
-            // For all files, check whether they exist and issue a warning if they don't.
-            for file in &mut dependencies {
-                match file.try_exists() {
-                    Ok(result) if !result => {
-                        warn!("{} does not exist. Ignoring...", file.display());
-                        file.clear()
-                    }
-                    Err(_) => warn!("Cannot determine whether {} exist", file.display()),
-                    _ => (),
-                }
-            }
-
-            // Filter out files that don't exist or can't be canoncialized (bad! this should never happen for an existing file).
-            // This should also filter out any non-existent files that we `clear()`ed earlier.
-            dependencies = dependencies
-                .iter_mut()
-                .filter(|dep| dep.exists())
-                .filter_map(|dep| dep.canonicalize().ok())
-                .collect::<Vec<_>>();
-
-            debug!("Dependencies after filtering: {:#?}", dependencies);
-
-            let mut files = vec![filepath.clone()]; // Always include the filename itself
-            files.extend(dependencies);
+            let mut files = vec![filename.to_string()]; // Always include the filename itself
+            files.extend(deps.into_iter().map(|dep| dep.to_string()));
             files
         }
         None => {
@@ -174,19 +172,21 @@ fn main() {
                 "No dependencies entry found for file {:#?}. Monitoring basedirectory.",
                 filename
             );
-            vec![base_directory]
+            vec![base_directory_string.to_string()]
         }
     };
 
-    debug!("all_files to monitor: {:#?}", all_files);
+    debug!("Files monitored for changes: {:#?}", all_files);
 
-    let latest_commit = get_latest_commit(&all_files, get_date).filter(|s| !s.is_empty());
+    let latest_commit =
+        get_latest_commit(&all_files, get_date, base_directory).filter(|s| !s.is_empty());
 
     if let Some(commit_hash) = latest_commit {
         debug!("Latest commit affecting {:#?}: {}", all_files, commit_hash);
         let mut owned_hash: String = commit_hash.to_owned();
         if !get_date {
-            let owned_flag: String = check_clean_working_tree(&all_files).to_owned();
+            let owned_flag: String =
+                check_clean_working_tree(&all_files, base_directory).to_owned();
             owned_hash.push_str(&owned_flag);
         }
         println!("{owned_hash}");
