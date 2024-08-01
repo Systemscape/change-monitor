@@ -9,8 +9,8 @@ const DEPENDENCIES_PATH: &str = ".deps.toml";
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Check if the working tree is clean, returns "" or " DIRTY"
-fn check_clean_working_tree(files: &Vec<String>, cwd: &Path) -> String {
+/// Check if the working tree is clean, i.e., no uncommitted changes
+fn is_working_tree_clean(files: &Vec<String>, cwd: &Path) -> bool {
     let output = Command::new("git")
         .current_dir(cwd)
         .arg("status")
@@ -20,11 +20,7 @@ fn check_clean_working_tree(files: &Vec<String>, cwd: &Path) -> String {
         .unwrap();
 
     // if there is no output, working tree is clean
-    if output.stdout == vec![] {
-        "".to_string()
-    } else {
-        " DIRTY".to_string() // otherwise DIRTY will be appended
-    }
+    output.stdout.is_empty()
 }
 
 /// Checks if inside .git repository.
@@ -63,7 +59,8 @@ fn get_latest_commit(files: &Vec<String>, get_date: bool, cwd: &Path) -> Option<
 
     if output.status.success() {
         let commit_hash = String::from_utf8_lossy(&output.stdout);
-        Some(commit_hash.to_string())
+        // Return as string but map empty string to None
+        Some(commit_hash.to_string()).filter(|s| !s.is_empty())
     } else {
         None
     }
@@ -133,15 +130,19 @@ fn main() {
     // Check if `--date` argument was passed
     let get_date = args.get(2).map_or(false, |arg| arg == "--date");
 
+    // Construct path where dependencies TOML file should be
     let dependencies_path = base_directory.join(DEPENDENCIES_PATH);
 
+    // If the TOML exists, use it, otherwise set to None.
     let dependencies = if dependencies_path.exists() {
+        // Parse toml into table
         let toml_file_string =
             fs::read_to_string(&dependencies_path).expect("Failed to read .deps.toml");
         let toml_file_table: toml::map::Map<String, toml::Value> = toml_file_string
             .parse::<toml::Table>()
             .expect("Failed to parse .deps.toml");
 
+        // Get the "dependencies" key as an array and convert to string
         let dependencies: Option<Vec<String>> = toml_file_table
             .get(filename)
             .and_then(|key| key.get("dependencies"))
@@ -186,18 +187,18 @@ fn main() {
 
     debug!("Files monitored for changes: {:#?}", all_files);
 
-    let latest_commit =
-        get_latest_commit(&all_files, get_date, base_directory).filter(|s| !s.is_empty());
+    // Get the latest commit id for all monitored files.
+    let latest_commit = get_latest_commit(&all_files, get_date, base_directory);
 
-    if let Some(commit_hash) = latest_commit {
+    // Print the correct commit hash, if any were found. Use println to print to stdout instead of stderr (logging)
+    if let Some(mut commit_hash) = latest_commit {
         debug!("Latest commit affecting {:#?}: {}", all_files, commit_hash);
-        let mut owned_hash: String = commit_hash.to_owned();
-        if !get_date {
-            let owned_flag: String =
-                check_clean_working_tree(&all_files, base_directory).to_owned();
-            owned_hash.push_str(&owned_flag);
+
+        // If no date is specified and the working tree is dirty, append a "DIRTY" string
+        if !get_date && !is_working_tree_clean(&all_files, base_directory) {
+            commit_hash.push_str(" DIRTY")
         }
-        println!("{owned_hash}");
+        println!("{commit_hash}");
     } else {
         error!("No commits found.");
         std::process::exit(1);
