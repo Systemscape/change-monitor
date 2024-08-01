@@ -79,7 +79,7 @@ fn main() {
 
     // Accept only 2 or 3 (with --date) arguments
     if args.len() < 2 || args.len() > 3 {
-        eprintln!("Usage: {} <filename> [--date]", args[0]);
+        eprintln!("Usage: {} <filename> [--date]\n--date outputs only the date of the latest commit instead of the hash", args[0]);
         std::process::exit(1);
     }
 
