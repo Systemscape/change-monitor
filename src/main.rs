@@ -70,7 +70,7 @@ fn get_latest_commit(files: &Vec<String>, get_date: bool, cwd: &Path) -> Option<
 }
 
 /// Parses a file called .deps.toml in the local directory.
-/// If no file is found, the complete local directory (and all subdirectories) are used for the git log command
+/// If no file is found, the complete local directory (and all subdirectories) are used for the git log command.
 /// If the file under question does not have a .deps.toml entry, the complete local directory
 /// (and all subdirectories) are used for the git log command.
 /// If the file is not yet commited, the complete local directory (and all subdirectories) are used for the
@@ -80,20 +80,30 @@ fn main() {
 
     let args: Vec<String> = env::args().collect();
 
+    // Accept only 2 or 3 (with --date) arguments
     if args.len() < 2 || args.len() > 3 {
         eprintln!("Usage: {} <filename> [--date]", args[0]);
         std::process::exit(1);
     }
 
+    // Check for version flag
     if &args[1] == "-v" || &args[1] == "--version" {
         eprintln!("Version: {}", VERSION);
         std::process::exit(0);
     }
 
+    // Extract the file to be monitored
     let filepath = PathBuf::from(&args[1])
         .canonicalize()
         .unwrap_or_else(|e| panic!("Invalid file: {}. Error: {}", &args[1], e));
 
+    // Check if the file exists at all
+    filepath
+        .try_exists()
+        .unwrap_or_else(|_| panic!("{} does not exist", filepath.display()));
+
+    // Obtain the directory of the monitored file for later use.
+    // If the file is a directory, use that directly.
     let base_directory = if filepath.is_dir() {
         &filepath
     } else {
@@ -106,15 +116,12 @@ fn main() {
         .to_str()
         .expect("Cannot convert base directory to string");
 
-    debug!("Using cwd: {:#?}", base_directory);
+    debug!("Using base_directory: {:#?}", base_directory);
 
+    // Ensure that there is a git repository present.
     check_git_repository(base_directory).expect("Checking git repository failed");
 
-    // Check if the file exists at all
-    filepath
-        .try_exists()
-        .unwrap_or_else(|_| panic!("{} does not exist", filepath.display()));
-
+    // Extract the filename from the path for later use
     let filename = filepath
         .file_name()
         .expect("Could not obtain filename from filepath.")
@@ -123,6 +130,7 @@ fn main() {
 
     info!("Monitor changes for file: {:#?}", filepath);
 
+    // Check if `--date` argument was passed
     let get_date = args.get(2).map_or(false, |arg| arg == "--date");
 
     let dependencies_path = base_directory.join(DEPENDENCIES_PATH);
