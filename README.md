@@ -8,7 +8,7 @@ How to identify the documents, find out who reviewed and approved them and preve
 
 We are developers first and foremost and don't want to deal with any badly designed UIs for document management, we want to use the tools we are familiar with: `git`, _GitHub_ and the command line.
 
-This tool solves just that problem. It is a thin wrapper around git that gives you the last commit which changed a file (or one of it's dependencies) you are interested in. The dependencies are defined in a simple _.toml_ file.
+This tool solves just that problem. It is a thin wrapper around git that gives you the last commit which changed a file (or one of its dependencies) you are interested in. The dependencies are defined in a simple _.toml_ file.
 
 We use it to automatically insert the git commit hash into our documents when building them and before using them internally or sending them to customers. We open a PR for changes and use GitHub for the review and approval process.
 
@@ -26,9 +26,24 @@ change-monitor <filename> [--date]
 
 The `--date` flag gives you the date of the latest commit instead of the hash, so you know the date the file was last changed.
 
-The commit hash or date respectively are logged to `stdout`, everything else goes to `stderr`.
+The commit hash or date, respectively, are written to `stdout`, everything else (loggingm, errors) goes to `stderr`.
 
-The tool looks for a file called `.deps.toml`, located at the basedirectory of your `<filename>`.
+The tool looks for a file called `.deps.toml` located at the basedirectory of your `<filename>`.
+
+### Examples
+```bash
+$ change-monitor example.typ
+INFO  [change_monitor] Monitor changes for file: "/Users/bob/docs/example-folder/example.typ"
+5d6256345067a82563106c868f2ad1b384286dce
+```
+
+or to get the date:
+
+```bash
+$ change-monitor example.typ --date
+INFO  [change_monitor] Monitor changes for file: "/Users/bob/docs/example-folder/example.typ"
+2024-07-26
+```
 
 ## .deps.toml template
 List dependencies for each versioned file
@@ -53,7 +68,7 @@ We pass the entries to git directly, so you can use [git pathspecs](https://git-
 ### Cloning
 ```bash
 git clone https://github.com/Systemscape/change-monitor
-````
+```
 
 ## Dependencies
 
@@ -87,7 +102,7 @@ just i
 or if you don't have `just` installed
 
 ```bash
-cargo install --path <path/to/folder>
+cargo install --path <path/to/repo>
 ```
 
 ### Alternative using cargo without cloning
